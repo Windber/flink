@@ -42,7 +42,6 @@ import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.internal.TableEnvironmentInternal;
 import org.apache.flink.table.catalog.UnresolvedIdentifier;
-import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.client.SqlClientException;
 import org.apache.flink.table.client.config.Environment;
 import org.apache.flink.table.client.gateway.Executor;
@@ -303,56 +302,6 @@ public class LocalExecutor implements Executor {
 	}
 
 	@Override
-	public List<String> listCatalogs(String sessionId) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tableEnv = context.getTableEnvironment();
-		return context.wrapClassLoader(() -> Arrays.asList(tableEnv.listCatalogs()));
-	}
-
-	@Override
-	public List<String> listDatabases(String sessionId) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tableEnv = context.getTableEnvironment();
-		return context.wrapClassLoader(() -> Arrays.asList(tableEnv.listDatabases()));
-	}
-
-	@Override
-	public void createTable(String sessionId, String ddl) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tEnv = context.getTableEnvironment();
-		try {
-			context.wrapClassLoader(() -> tEnv.executeSql(ddl));
-		} catch (Exception e) {
-			throw new SqlExecutionException("Could not create a table from statement: " + ddl, e);
-		}
-	}
-
-	@Override
-	public void dropTable(String sessionId, String ddl) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tEnv = context.getTableEnvironment();
-		try {
-			context.wrapClassLoader(() -> tEnv.executeSql(ddl));
-		} catch (Exception e) {
-			throw new SqlExecutionException("Could not drop table from statement: " + ddl, e);
-		}
-	}
-
-	@Override
-	public List<String> listTables(String sessionId) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tableEnv = context.getTableEnvironment();
-		return context.wrapClassLoader(() -> Arrays.asList(tableEnv.listTables()));
-	}
-
-	@Override
-	public List<String> listUserDefinedFunctions(String sessionId) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tableEnv = context.getTableEnvironment();
-		return context.wrapClassLoader(() -> Arrays.asList(tableEnv.listUserDefinedFunctions()));
-	}
-
-	@Override
 	public TableResult executeSql(String sessionId, String statement) throws SqlExecutionException {
 		final ExecutionContext<?> context = getExecutionContext(sessionId);
 		final TableEnvironment tEnv = context.getTableEnvironment();
@@ -364,59 +313,10 @@ public class LocalExecutor implements Executor {
 	}
 
 	@Override
-	public List<String> listFunctions(String sessionId) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tableEnv = context.getTableEnvironment();
-		return context.wrapClassLoader(() -> Arrays.asList(tableEnv.listFunctions()));
-	}
-
-	@Override
 	public List<String> listModules(String sessionId) throws SqlExecutionException {
 		final ExecutionContext<?> context = getExecutionContext(sessionId);
 		final TableEnvironment tableEnv = context.getTableEnvironment();
 		return context.wrapClassLoader(() -> Arrays.asList(tableEnv.listModules()));
-	}
-
-	@Override
-	public void useCatalog(String sessionId, String catalogName) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tableEnv = context.getTableEnvironment();
-
-		context.wrapClassLoader(() -> {
-			// Rely on TableEnvironment/CatalogManager to validate input
-			try {
-				tableEnv.useCatalog(catalogName);
-			} catch (CatalogException e) {
-				throw new SqlExecutionException("Failed to switch to catalog " + catalogName, e);
-			}
-		});
-	}
-
-	@Override
-	public void useDatabase(String sessionId, String databaseName) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tableEnv = context.getTableEnvironment();
-
-		context.wrapClassLoader(() -> {
-			// Rely on TableEnvironment/CatalogManager to validate input
-			try {
-				tableEnv.useDatabase(databaseName);
-			} catch (CatalogException e) {
-				throw new SqlExecutionException("Failed to switch to database " + databaseName, e);
-			}
-		});
-	}
-
-	@Override
-	public TableSchema getTableSchema(String sessionId, String name) throws SqlExecutionException {
-		final ExecutionContext<?> context = getExecutionContext(sessionId);
-		final TableEnvironment tableEnv = context.getTableEnvironment();
-		try {
-			return context.wrapClassLoader(() -> tableEnv.from(name).getSchema());
-		} catch (Throwable t) {
-			// catch everything such that the query does not crash the executor
-			throw new SqlExecutionException("No table with this name could be found.", t);
-		}
 	}
 
 	@Override
@@ -587,13 +487,17 @@ public class LocalExecutor implements Executor {
 		// create execution
 		final ProgramDeployer deployer = new ProgramDeployer(configuration, jobName, pipeline);
 
-		// blocking deployment
-		try {
-			JobClient jobClient = deployer.deploy().get();
-			return ProgramTargetDescriptor.of(jobClient.getJobID());
-		} catch (Exception e) {
-			throw new RuntimeException("Error running SQL job.", e);
-		}
+		// wrap in classloader because CodeGenOperatorFactory#getStreamOperatorClass
+		// requires to access UDF in deployer.deploy().
+		return context.wrapClassLoader(() -> {
+			try {
+				// blocking deployment
+				JobClient jobClient = deployer.deploy().get();
+				return ProgramTargetDescriptor.of(jobClient.getJobID());
+			} catch (Exception e) {
+				throw new RuntimeException("Error running SQL job.", e);
+			}
+		});
 	}
 
 	private <C> ResultDescriptor executeQueryInternal(String sessionId, ExecutionContext<C> context, String query) {
@@ -641,12 +545,16 @@ public class LocalExecutor implements Executor {
 				configuration, jobName, pipeline);
 
 		JobClient jobClient;
-		// blocking deployment
-		try {
-			jobClient = deployer.deploy().get();
-		} catch (Exception e) {
-			throw new SqlExecutionException("Error while submitting job.", e);
-		}
+		// wrap in classloader because CodeGenOperatorFactory#getStreamOperatorClass
+		// requires to access UDF in deployer.deploy().
+		jobClient = context.wrapClassLoader(() -> {
+			try {
+				// blocking deployment
+				return deployer.deploy().get();
+			} catch (Exception e) {
+				throw new SqlExecutionException("Error while submitting job.", e);
+			}
+		});
 
 		String jobId = jobClient.getJobID().toString();
 		// store the result under the JobID

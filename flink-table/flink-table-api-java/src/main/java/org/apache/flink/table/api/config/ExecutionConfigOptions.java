@@ -18,9 +18,12 @@
 
 package org.apache.flink.table.api.config;
 
+import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.description.Description;
+
+import java.time.Duration;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 import static org.apache.flink.configuration.description.TextElement.code;
@@ -33,11 +36,29 @@ import static org.apache.flink.configuration.description.TextElement.text;
  *
  * <p>NOTE: All option keys in this class must start with "table.exec".
  */
+@PublicEvolving
 public class ExecutionConfigOptions {
+
+	// ------------------------------------------------------------------------
+	//  State Options
+	// ------------------------------------------------------------------------
+
+	@Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+	public static final ConfigOption<Duration> IDLE_STATE_RETENTION =
+		key("table.exec.state.ttl")
+			.durationType()
+			.defaultValue(Duration.ofMillis(0))
+			.withDescription("Specifies a minimum time interval for how long idle state " +
+					"(i.e. state which was not updated), will be retained. State will never be " +
+					"cleared until it was idle for less than the minimum time, and will be cleared " +
+					"at some time after it was idle. Default is never clean-up the state. " +
+					"NOTE: Cleaning up state requires additional overhead for bookkeeping. " +
+					"Default value is 0, which means that it will never clean up state.");
 
 	// ------------------------------------------------------------------------
 	//  Source Options
 	// ------------------------------------------------------------------------
+
 	@Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
 	public static final ConfigOption<String> TABLE_EXEC_SOURCE_IDLE_TIMEOUT =
 		key("table.exec.source.idle-timeout")

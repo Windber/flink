@@ -231,6 +231,8 @@ class TableEnvironmentITCase(
 
     val resultFile = _tempFolder.newFile().getAbsolutePath
     result.toDataSet[(Long, Double)]
+      // format the double with 5 fractional digits for comparison
+      .map(ds => (ds._1.toString, "%.5f".format(ds._2)))
       .writeAsCsv(resultFile, writeMode=FileSystem.WriteMode.OVERWRITE)
 
     tEnv.execute("job name")
@@ -240,7 +242,7 @@ class TableEnvironmentITCase(
     assertEquals("", Source.fromFile(resultFile).mkString)
 
     env.execute("job")
-    val expected2 = "8,24.953750000000003\n"
+    val expected2 = "8,24.95375\n"
     val actual = Source.fromFile(resultFile).mkString
     assertEquals(expected2, actual)
     // does not trigger the table program execution again
@@ -540,15 +542,15 @@ class TableEnvironmentITCase(
     val t = CollectionDataSets.getSmall3TupleDataSet(env).toTable(tEnv).as('a, 'b, 'c)
     tEnv.registerTable("MyTable", t)
 
-    val sinkPath = _tempFolder.newFile().getAbsolutePath
-    val configuredSink = new TestingOverwritableTableSink(sinkPath)
+    MemoryTableSourceSinkUtil.clear()
+    val configuredSink = new MemoryTableSourceSinkUtil.UnsafeMemoryAppendTableSink()
       .configure(Array("d", "e", "f"), Array(INT, LONG, STRING))
-    tEnv.asInstanceOf[TableEnvironmentInternal].registerTableSinkInternal("MySink", configuredSink)
-    assertTrue(FileUtils.readFileUtf8(new File(sinkPath)).isEmpty)
+    tEnv.asInstanceOf[TableEnvironmentInternal]
+      .registerTableSinkInternal("MySink", configuredSink)
 
     val stmtSet = tEnv.createStatementSet()
-    stmtSet.addInsert("MySink", tEnv.sqlQuery("select * from MyTable where a > 2"), true)
-      .addInsertSql("INSERT OVERWRITE MySink SELECT a, b, c FROM MyTable where a <= 2")
+    stmtSet.addInsert("MySink", tEnv.sqlQuery("select * from MyTable where a > 2"))
+      .addInsertSql("INSERT INTO MySink SELECT a, b, c FROM MyTable where a <= 2")
 
     val tableResult = stmtSet.execute()
     // wait job finished

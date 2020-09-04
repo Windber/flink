@@ -178,15 +178,39 @@ Format Options
           This option indicates whether the Debezium JSON message includes the schema or not. </td>
     </tr>
     <tr>
-      <td><h5>json.ignore-parse-errors</h5></td>
+      <td><h5>debezium-json.ignore-parse-errors</h5></td>
       <td>optional</td>
       <td style="word-wrap: break-word;">false</td>
       <td>Boolean</td>
       <td>Skip fields and rows with parse errors instead of failing.
       Fields are set to null in case of errors.</td>
     </tr>
+    <tr>
+       <td><h5>debezium-json.timestamp-format.standard</h5></td>
+       <td>optional</td>
+       <td style="word-wrap: break-word;"><code>'SQL'</code></td>
+       <td>String</td>
+       <td>Specify the input and output timestamp format. Currently supported values are <code>'SQL'</code> and <code>'ISO-8601'</code>:
+       <ul>
+         <li>Option <code>'SQL'</code> will parse input timestamp in "yyyy-MM-dd HH:mm:ss.s{precision}" format, e.g '2020-12-30 12:13:14.123' and output timestamp in the same format.</li>
+         <li>Option <code>'ISO-8601'</code>will parse input timestamp in "yyyy-MM-ddTHH:mm:ss.s{precision}" format, e.g '2020-12-30T12:13:14.123' and output timestamp in the same format.</li>
+       </ul>
+       </td>
+    </tr>
     </tbody>
 </table>
+
+Caveats
+----------------
+
+### Consuming data produced by Debezium Postgres Connector
+
+If you are using [Debezium Connector for PostgreSQL](https://debezium.io/documentation/reference/1.2/connectors/postgresql.html) to capture the changes to Kafka, please make sure the [REPLICA IDENTITY](https://www.postgresql.org/docs/current/sql-altertable.html#SQL-CREATETABLE-REPLICA-IDENTITY) configuration of the monitored PostgreSQL table has been set to `FULL` which is by default `DEFAULT`.
+Otherwise, Flink SQL currently will fail to interpret the Debezium data.
+
+In `FULL` strategy, the UPDATE and DELETE events will contain the previous values of all the table’s columns. In other strategies, the "before" field of UPDATE and DELETE events will only contain primary key columns or null if no primary key.
+You can change the `REPLICA IDENTITY` by running `ALTER TABLE <your-table-name> REPLICA IDENTITY FULL`.
+See more details in [Debezium Documentation for PostgreSQL REPLICA IDENTITY](https://debezium.io/documentation/reference/1.2/connectors/postgresql.html#postgresql-replica-identity).
 
 Data Type Mapping
 ----------------

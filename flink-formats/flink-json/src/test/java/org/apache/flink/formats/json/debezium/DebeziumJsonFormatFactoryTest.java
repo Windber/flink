@@ -20,6 +20,7 @@ package org.apache.flink.formats.json.debezium;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.formats.json.TimestampFormat;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.CatalogTableImpl;
@@ -30,7 +31,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.factories.TestDynamicTableFactory;
 import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContext;
-import org.apache.flink.table.runtime.typeutils.RowDataTypeInfo;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.TestLogger;
 
@@ -64,9 +65,10 @@ public class DebeziumJsonFormatFactoryTest extends TestLogger {
 	public void testSeDeSchema() {
 		final DebeziumJsonDeserializationSchema expectedDeser = new DebeziumJsonDeserializationSchema(
 			ROW_TYPE,
-			new RowDataTypeInfo(ROW_TYPE),
+			InternalTypeInfo.of(ROW_TYPE),
 			true,
-			true);
+			true,
+			TimestampFormat.ISO_8601);
 
 		final Map<String, String> options = getAllOptions();
 
@@ -122,6 +124,7 @@ public class DebeziumJsonFormatFactoryTest extends TestLogger {
 		options.put("format", "debezium-json");
 		options.put("debezium-json.ignore-parse-errors", "true");
 		options.put("debezium-json.schema-include", "true");
+		options.put("debezium-json.timestamp-format.standard", "ISO-8601");
 		return options;
 	}
 

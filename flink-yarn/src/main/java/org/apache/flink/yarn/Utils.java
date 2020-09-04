@@ -51,7 +51,6 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -69,9 +68,6 @@ import static org.apache.flink.yarn.YarnConfigKeys.LOCAL_RESOURCE_DESCRIPTOR_SEP
 public final class Utils {
 
 	private static final Logger LOG = LoggerFactory.getLogger(Utils.class);
-
-	/** Keytab file name populated in YARN container. */
-	public static final String DEFAULT_KEYTAB_FILE = "krb5.keytab";
 
 	/** KRB5 file name populated in YARN container for secure IT run. */
 	public static final String KRB5_FILE_NAME = "krb5.conf";
@@ -128,12 +124,13 @@ public final class Utils {
 			Path remoteRsrcPath,
 			long resourceSize,
 			long resourceModificationTime,
-			LocalResourceVisibility resourceVisibility) {
+			LocalResourceVisibility resourceVisibility,
+			LocalResourceType resourceType) {
 		LocalResource localResource = Records.newRecord(LocalResource.class);
 		localResource.setResource(ConverterUtils.getYarnUrlFromURI(remoteRsrcPath.toUri()));
 		localResource.setSize(resourceSize);
 		localResource.setTimestamp(resourceModificationTime);
-		localResource.setType(LocalResourceType.FILE);
+		localResource.setType(resourceType);
 		localResource.setVisibility(resourceVisibility);
 		return localResource;
 	}
@@ -144,13 +141,17 @@ public final class Utils {
 	 * @param remoteRsrcPath resource path to be registered
 	 * @return YARN resource
 	 */
-	private static LocalResource registerLocalResource(FileSystem fs, Path remoteRsrcPath) throws IOException {
+	private static LocalResource registerLocalResource(
+			FileSystem fs,
+			Path remoteRsrcPath,
+			LocalResourceType resourceType) throws IOException {
 		FileStatus jarStat = fs.getFileStatus(remoteRsrcPath);
 		return registerLocalResource(
 			remoteRsrcPath,
 			jarStat.getLen(),
 			jarStat.getModificationTime(),
-			LocalResourceVisibility.APPLICATION);
+			LocalResourceVisibility.APPLICATION,
+			resourceType);
 	}
 
 	public static void setTokensFor(ContainerLaunchContext amContainer, List<Path> paths, Configuration conf) throws IOException {
@@ -364,7 +365,7 @@ public final class Utils {
 			log.info("Adding keytab {} to the AM container local resource bucket", remoteKeytabPath);
 			Path keytabPath = new Path(remoteKeytabPath);
 			FileSystem fs = keytabPath.getFileSystem(yarnConfig);
-			keytabResource = registerLocalResource(fs, keytabPath);
+			keytabResource = registerLocalResource(fs, keytabPath, LocalResourceType.FILE);
 		}
 
 		//To support Yarn Secure Integration Test Scenario
@@ -375,14 +376,14 @@ public final class Utils {
 			log.info("TM:Adding remoteYarnConfPath {} to the container local resource bucket", remoteYarnConfPath);
 			Path yarnConfPath = new Path(remoteYarnConfPath);
 			FileSystem fs = yarnConfPath.getFileSystem(yarnConfig);
-			yarnConfResource = registerLocalResource(fs, yarnConfPath);
+			yarnConfResource = registerLocalResource(fs, yarnConfPath, LocalResourceType.FILE);
 		}
 
 		if (remoteKrb5Path != null) {
 			log.info("TM:Adding remoteKrb5Path {} to the container local resource bucket", remoteKrb5Path);
 			Path krb5ConfPath = new Path(remoteKrb5Path);
 			FileSystem fs = krb5ConfPath.getFileSystem(yarnConfig);
-			krb5ConfResource = registerLocalResource(fs, krb5ConfPath);
+			krb5ConfResource = registerLocalResource(fs, krb5ConfPath, LocalResourceType.FILE);
 			hasKrb5 = true;
 		}
 
@@ -460,14 +461,7 @@ public final class Utils {
 			log.debug("Adding security tokens to TaskExecutor's container launch context.");
 
 			try (DataOutputBuffer dob = new DataOutputBuffer()) {
-				Method readTokenStorageFileMethod = Credentials.class.getMethod(
-					"readTokenStorageFile", File.class, org.apache.hadoop.conf.Configuration.class);
-
-				Credentials cred =
-					(Credentials) readTokenStorageFileMethod.invoke(
-						null,
-						new File(fileLocation),
-						HadoopUtils.getHadoopConfiguration(flinkConfig));
+				Credentials cred = Credentials.readTokenStorageFile(new File(fileLocation), HadoopUtils.getHadoopConfiguration(flinkConfig));
 
 				// Filter out AMRMToken before setting the tokens to the TaskManager container context.
 				Credentials taskManagerCred = new Credentials();

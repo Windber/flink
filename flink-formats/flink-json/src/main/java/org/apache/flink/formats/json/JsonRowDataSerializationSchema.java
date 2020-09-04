@@ -20,6 +20,7 @@ package org.apache.flink.formats.json;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.SerializationSchema;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.MapData;
@@ -41,12 +42,16 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Objects;
 
 import static java.time.format.DateTimeFormatter.ISO_LOCAL_DATE;
-import static org.apache.flink.formats.json.TimeFormats.RFC3339_TIMESTAMP_FORMAT;
-import static org.apache.flink.formats.json.TimeFormats.RFC3339_TIME_FORMAT;
+import static org.apache.flink.formats.json.TimeFormats.ISO8601_TIMESTAMP_FORMAT;
+import static org.apache.flink.formats.json.TimeFormats.ISO8601_TIMESTAMP_WITH_LOCAL_TIMEZONE_FORMAT;
+import static org.apache.flink.formats.json.TimeFormats.SQL_TIMESTAMP_FORMAT;
+import static org.apache.flink.formats.json.TimeFormats.SQL_TIMESTAMP_WITH_LOCAL_TIMEZONE_FORMAT;
+import static org.apache.flink.formats.json.TimeFormats.SQL_TIME_FORMAT;
 
 /**
  * Serialization schema that serializes an object of Flink internal data structure into a JSON bytes.
@@ -72,8 +77,12 @@ public class JsonRowDataSerializationSchema implements SerializationSchema<RowDa
 	/** Reusable object node. */
 	private transient ObjectNode node;
 
-	public JsonRowDataSerializationSchema(RowType rowType) {
+	/** Timestamp format specification which is used to parse timestamp. */
+	private final TimestampFormat timestampFormat;
+
+	public JsonRowDataSerializationSchema(RowType rowType, TimestampFormat timestampFormat) {
 		this.rowType = rowType;
+		this.timestampFormat = timestampFormat;
 		this.runtimeConverter = createConverter(rowType);
 	}
 
@@ -101,12 +110,12 @@ public class JsonRowDataSerializationSchema implements SerializationSchema<RowDa
 			return false;
 		}
 		JsonRowDataSerializationSchema that = (JsonRowDataSerializationSchema) o;
-		return rowType.equals(that.rowType);
+		return rowType.equals(that.rowType) && timestampFormat.equals(timestampFormat);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(rowType);
+		return Objects.hash(rowType, timestampFormat);
 	}
 
 	// --------------------------------------------------------------------------------
@@ -162,9 +171,10 @@ public class JsonRowDataSerializationSchema implements SerializationSchema<RowDa
 				return createDateConverter();
 			case TIME_WITHOUT_TIME_ZONE:
 				return createTimeConverter();
-			case TIMESTAMP_WITH_TIME_ZONE:
 			case TIMESTAMP_WITHOUT_TIME_ZONE:
 				return createTimestampConverter();
+			case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+				return createTimestampWithLocalZone();
 			case DECIMAL:
 				return createDecimalConverter();
 			case ARRAY:
@@ -199,16 +209,46 @@ public class JsonRowDataSerializationSchema implements SerializationSchema<RowDa
 		return (mapper, reuse, value) -> {
 			int millisecond = (int) value;
 			LocalTime time = LocalTime.ofSecondOfDay(millisecond / 1000L);
-			return mapper.getNodeFactory().textNode(RFC3339_TIME_FORMAT.format(time));
+			return mapper.getNodeFactory().textNode(SQL_TIME_FORMAT.format(time));
 		};
 	}
 
 	private SerializationRuntimeConverter createTimestampConverter() {
-		return (mapper, reuse, value) -> {
-			TimestampData timestamp = (TimestampData) value;
-			return mapper.getNodeFactory()
-				.textNode(RFC3339_TIMESTAMP_FORMAT.format(timestamp.toLocalDateTime()));
-		};
+		switch (timestampFormat){
+			case ISO_8601:
+				return (mapper, reuse, value) -> {
+					TimestampData timestamp = (TimestampData) value;
+					return mapper.getNodeFactory()
+						.textNode(ISO8601_TIMESTAMP_FORMAT.format(timestamp.toLocalDateTime()));
+				};
+			case SQL:
+				return (mapper, reuse, value) -> {
+					TimestampData timestamp = (TimestampData) value;
+					return mapper.getNodeFactory()
+						.textNode(SQL_TIMESTAMP_FORMAT.format(timestamp.toLocalDateTime()));
+				};
+			default:
+				throw new TableException("Unsupported timestamp format. Validator should have checked that.");
+		}
+	}
+
+	private SerializationRuntimeConverter createTimestampWithLocalZone() {
+		switch (timestampFormat){
+			case ISO_8601:
+				return (mapper, reuse, value) -> {
+					TimestampData timestampWithLocalZone = (TimestampData) value;
+					return mapper.getNodeFactory()
+						.textNode(ISO8601_TIMESTAMP_WITH_LOCAL_TIMEZONE_FORMAT.format(timestampWithLocalZone.toInstant().atOffset(ZoneOffset.UTC)));
+				};
+			case SQL:
+				return (mapper, reuse, value) -> {
+					TimestampData timestampWithLocalZone = (TimestampData) value;
+					return mapper.getNodeFactory()
+						.textNode(SQL_TIMESTAMP_WITH_LOCAL_TIMEZONE_FORMAT.format(timestampWithLocalZone.toInstant().atOffset(ZoneOffset.UTC)));
+				};
+			default:
+				throw new TableException("Unsupported timestamp format. Validator should have checked that.");
+		}
 	}
 
 	private SerializationRuntimeConverter createArrayConverter(ArrayType type) {
