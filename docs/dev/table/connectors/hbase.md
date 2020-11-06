@@ -42,7 +42,9 @@ In order to setup the HBase connector, the following table provide dependency in
 
 | HBase Version       | Maven dependency                                          | SQL Client JAR         |
 | :------------------ | :-------------------------------------------------------- | :----------------------|
-| 1.4.x               | `flink-connector-hbase{{site.scala_version_suffix}}`      | {% if site.is_stable %} [Download](https://repo.maven.apache.org/maven2/org/apache/flink/flink-connector-hbase{{site.scala_version_suffix}}/{{site.version}}/flink-connector-hbase{{site.scala_version_suffix}}-{{site.version}}.jar) {% else %} Only available for [stable releases]({{ site.stable_baseurl }}/dev/table/connectors/hbase.html) {% endif %}|
+| 1.4.x               | `flink-connector-hbase{{site.scala_version_suffix}}`      | Unsupported |
+
+*Note: To use HBase connector in SQL Client or Flink cluster, it's highly recommended to add HBase dependency jars to Hadoop classpath. Flink will load all jars under Hadoop classpath automatically, please refer to [HBase, MapReduce, and the CLASSPATH](https://hbase.apache.org/book.html#hbase.mapreduce.classpath) about how to add HBase dependency jars to Hadoop classpath.*
 
 
 How to use HBase table
@@ -144,7 +146,7 @@ Connector Options
     <tr>
       <td><h5>sink.buffer-flush.max-rows</h5></td>
       <td>optional</td>
-      <td style="word-wrap: break-word;">(none)</td>
+      <td style="word-wrap: break-word;">1000</td>
       <td>Integer</td>
       <td>Writing option, maximum number of rows to buffer for each writing request.
       This can improve performance for writing data to HBase database, but may increase the latency.

@@ -84,6 +84,7 @@ import org.apache.flink.streaming.api.functions.source.StatefulSequenceSource;
 import org.apache.flink.streaming.api.functions.source.TimestampedFileInputSplit;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.graph.StreamGraphGenerator;
+import org.apache.flink.streaming.api.graph.StreamingJobGraphGenerator;
 import org.apache.flink.streaming.api.operators.StreamSource;
 import org.apache.flink.util.DynamicCodeLoadingException;
 import org.apache.flink.util.ExceptionUtils;
@@ -129,9 +130,6 @@ public class StreamExecutionEnvironment {
 	/** The time characteristic that is used if none other is set. */
 	private static final TimeCharacteristic DEFAULT_TIME_CHARACTERISTIC = TimeCharacteristic.ProcessingTime;
 
-	/** The default buffer timeout (max delay of records in the network stack). */
-	private static final long DEFAULT_NETWORK_BUFFER_TIMEOUT = 100L;
-
 	/**
 	 * The environment of the context (local by default, cluster if invoked through command line).
 	 */
@@ -153,7 +151,7 @@ public class StreamExecutionEnvironment {
 
 	protected final List<Transformation<?>> transformations = new ArrayList<>();
 
-	private long bufferTimeout = DEFAULT_NETWORK_BUFFER_TIMEOUT;
+	private long bufferTimeout = StreamingJobGraphGenerator.UNDEFINED_NETWORK_BUFFER_TIMEOUT;
 
 	protected boolean isChainingEnabled = true;
 
@@ -203,7 +201,7 @@ public class StreamExecutionEnvironment {
 	public StreamExecutionEnvironment(
 			final Configuration configuration,
 			final ClassLoader userClassloader) {
-		this(DefaultExecutorServiceLoader.INSTANCE, configuration, userClassloader);
+		this(new DefaultExecutorServiceLoader(), configuration, userClassloader);
 	}
 
 	/**
@@ -1629,11 +1627,11 @@ public class StreamExecutionEnvironment {
 	 * @return the data stream constructed
 	 */
 	@Experimental
-	public <OUT> DataStreamSource<OUT> continuousSource(
+	public <OUT> DataStreamSource<OUT> fromSource(
 			Source<OUT, ?, ?> source,
 			WatermarkStrategy<OUT> timestampsAndWatermarks,
 			String sourceName) {
-		return continuousSource(source, timestampsAndWatermarks, sourceName, null);
+		return fromSource(source, timestampsAndWatermarks, sourceName, null);
 	}
 
 	/**
@@ -1650,7 +1648,7 @@ public class StreamExecutionEnvironment {
 	 * @return the data stream constructed
 	 */
 	@Experimental
-	public <OUT> DataStreamSource<OUT> continuousSource(
+	public <OUT> DataStreamSource<OUT> fromSource(
 			Source<OUT, ?, ?> source,
 			WatermarkStrategy<OUT> timestampsAndWatermarks,
 			String sourceName,
@@ -1725,10 +1723,15 @@ public class StreamExecutionEnvironment {
 
 			return jobExecutionResult;
 		} catch (Throwable t) {
+			// get() on the JobExecutionResult Future will throw an ExecutionException. This
+			// behaviour was largely not there in Flink versions before the PipelineExecutor
+			// refactoring so we should strip that exception.
+			Throwable strippedException = ExceptionUtils.stripExecutionException(t);
+
 			jobListeners.forEach(jobListener -> {
-				jobListener.onJobExecuted(null, ExceptionUtils.stripExecutionException(t));
+				jobListener.onJobExecuted(null, strippedException);
 			});
-			ExceptionUtils.rethrowException(t);
+			ExceptionUtils.rethrowException(strippedException);
 
 			// never reached, only make javac happy
 			return null;
@@ -2170,7 +2173,7 @@ public class StreamExecutionEnvironment {
 			Class<?> baseSourceClass,
 			TypeInformation<OUT> typeInfo) {
 		TypeInformation<OUT> resolvedTypeInfo = typeInfo;
-		if (source instanceof ResultTypeQueryable) {
+		if (resolvedTypeInfo == null && source instanceof ResultTypeQueryable) {
 			resolvedTypeInfo = ((ResultTypeQueryable<OUT>) source).getProducedType();
 		}
 		if (resolvedTypeInfo == null) {

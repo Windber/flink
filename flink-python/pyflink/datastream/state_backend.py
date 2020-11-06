@@ -55,7 +55,7 @@ def _from_j_state_backend(j_state_backend):
         return CustomStateBackend(j_state_backend)  # users' customized state backend
 
 
-class StateBackend(object):
+class StateBackend(object, metaclass=ABCMeta):
     """
     A **State Backend** defines how the state of a streaming application is stored and
     checkpointed. Different State Backends store their state in different fashions, and use
@@ -109,8 +109,6 @@ class StateBackend(object):
     State backend implementations have to be thread-safe. Multiple threads may be creating
     streams and keyed-/operator state backends concurrently.
     """
-
-    __metaclass__ = ABCMeta
 
     def __init__(self, j_state_backend):
         self._j_state_backend = j_state_backend
@@ -637,11 +635,11 @@ class RocksDBStateBackend(StateBackend):
                                            The options factory must have a default constructor.
         """
         gateway = get_gateway()
-        JOptionsFactory = gateway.jvm.org.apache.flink.contrib.streaming.state.OptionsFactory
+        JOptionsFactory = gateway.jvm.org.apache.flink.contrib.streaming.state.RocksDBOptionsFactory
         j_options_factory_clz = load_java_class(options_factory_class_name)
         if not get_java_class(JOptionsFactory).isAssignableFrom(j_options_factory_clz):
-            raise ValueError("The input class not implements OptionsFactory.")
-        self._j_rocks_db_state_backend.setOptions(j_options_factory_clz.newInstance())
+            raise ValueError("The input class does not implement RocksDBOptionsFactory.")
+        self._j_rocks_db_state_backend.setRocksDBOptions(j_options_factory_clz.newInstance())
 
     def get_options(self):
         """
@@ -650,7 +648,7 @@ class RocksDBStateBackend(StateBackend):
 
         :return: The fully-qualified class name of the options factory in Java.
         """
-        j_options_factory = self._j_rocks_db_state_backend.getOptions()
+        j_options_factory = self._j_rocks_db_state_backend.getRocksDBOptions()
         if j_options_factory is not None:
             return j_options_factory.getClass().getName()
         else:

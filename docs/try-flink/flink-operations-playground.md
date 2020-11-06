@@ -2,7 +2,7 @@
 title: "Flink Operations Playground"
 nav-title: 'Flink Operations Playground'
 nav-parent_id: try-flink
-nav-pos: 4
+nav-pos: 5
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -54,8 +54,8 @@ This playground consists of a long living
 Cluster.
 
 A Flink Cluster always consists of a 
-[Flink Master]({{ site.baseurl }}/concepts/glossary.html#flink-master) and one or more 
-[Flink TaskManagers]({{ site.baseurl }}/concepts/glossary.html#flink-taskmanager). The Flink Master 
+[JobManager]({{ site.baseurl }}/concepts/glossary.html#flink-jobmanager) and one or more 
+[Flink TaskManagers]({{ site.baseurl }}/concepts/glossary.html#flink-taskmanager). The JobManager 
 is responsible for handling [Job]({{ site.baseurl }}/concepts/glossary.html#flink-job) submissions, 
 the supervision of Jobs as well as resource management. The Flink TaskManagers are the worker 
 processes and are responsible for the execution of the actual 
@@ -71,7 +71,7 @@ The Kafka Cluster consists of a Zookeeper server and a Kafka Broker.
 class="offset" width="80%" />
 
 When the playground is started a Flink Job called *Flink Event Count* will be submitted to the 
-Flink Master. Additionally, two Kafka Topics *input* and *output* are created.
+JobManager. Additionally, two Kafka Topics *input* and *output* are created.
 
 <img src="{{ site.baseurl }}/fig/click-event-count-example.svg" alt="Click Event Count Example"
 class="offset" width="80%" />
@@ -286,7 +286,7 @@ an external resource).
 docker-compose kill taskmanager
 {% endhighlight %}
 
-After a few seconds, the Flink Master will notice the loss of the TaskManager, cancel the affected Job, and 
+After a few seconds, the JobManager will notice the loss of the TaskManager, cancel the affected Job, and 
 immediately resubmit it for recovery.
 When the Job gets restarted, its tasks remain in the `SCHEDULED` state, which is indicated by the 
 purple colored squares (see screenshot below).
@@ -308,13 +308,13 @@ similar to a real production setup where data is produced while the Job to proce
 
 #### Step 3: Recovery
 
-Once you restart the TaskManager, it reconnects to the Master.
+Once you restart the TaskManager, it reconnects to the JobManager.
 
 {% highlight bash%}
 docker-compose up -d taskmanager
 {% endhighlight %}
 
-When the Master is notified about the new TaskManager, it schedules the tasks of the 
+When the JobManager is notified about the new TaskManager, it schedules the tasks of the 
 recovering Job to the newly available TaskSlots. Upon restart, the tasks recover their state from
 the last successful [checkpoint]({{ site.baseurl }}/learn-flink/fault_tolerance.html) that was taken
 before the failure and switch to the `RUNNING` state.
@@ -367,26 +367,13 @@ docker-compose run --no-deps client flink stop <job-id>
 **Expected Output**
 {% highlight bash %}
 Suspending job "<job-id>" with a savepoint.
-Suspended job "<job-id>" with a savepoint.
+Savepoint completed. Path: file:<savepoint-path>
 {% endhighlight %}
 
 The Savepoint has been stored to the `state.savepoint.dir` configured in the *flink-conf.yaml*, 
 which is mounted under */tmp/flink-savepoints-directory/* on your local machine. You will need the 
-path to this Savepoint in the next step. In case of the REST API this path was already part of the 
-response, you will need to have a look at the filesystem directly.
+path to this Savepoint in the next step. 
 
-**Command**
-{% highlight bash %}
-ls -lia /tmp/flink-savepoints-directory
-{% endhighlight %}
-
-**Expected Output**
-{% highlight bash %}
-total 0
-  17 drwxr-xr-x   3 root root   60 17 jul 17:05 .
-   2 drwxrwxrwt 135 root root 3420 17 jul 17:09 ..
-1002 drwxr-xr-x   2 root root  140 17 jul 17:05 savepoint-<short-job-id>-<uuid>
-{% endhighlight %}
 </div>
  <div data-lang="REST API" markdown="1">
  
@@ -438,7 +425,6 @@ docker-compose run --no-deps client flink run -s <savepoint-path> \
 {% endhighlight %}
 **Expected Output**
 {% highlight bash %}
-Starting execution of program
 Job has been submitted with JobID <job-id>
 {% endhighlight %}
 </div>
@@ -537,14 +523,14 @@ execute it with the increased parallelism (2 available, 3 needed). With
 docker-compose scale taskmanager=2
 {% endhighlight %}
 you can add a second TaskManager with two TaskSlots to the Flink Cluster, which will automatically register with the 
-Flink Master. Shortly after adding the TaskManager the Job should start running again.
+JobManager. Shortly after adding the TaskManager the Job should start running again.
 
 Once the Job is "RUNNING" again, you will see in the *output* Topic that no data was lost during 
 rescaling: all windows are present with a count of exactly one thousand.
 
 ### Querying the Metrics of a Job
 
-The Flink Master exposes system and user [metrics]({{ site.baseurl }}/monitoring/metrics.html)
+The JobManager exposes system and user [metrics]({{ site.baseurl }}/monitoring/metrics.html)
 via its REST API.
 
 The endpoint depends on the scope of these metrics. Metrics scoped to a Job can be listed via 

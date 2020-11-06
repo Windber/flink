@@ -22,16 +22,18 @@ import org.apache.flink.api.scala._
 import org.apache.flink.table.api._
 import org.apache.flink.table.api.bridge.scala._
 import org.apache.flink.table.planner.factories.TestValuesTableFactory
-import org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow
+import org.apache.flink.table.planner.factories.TestValuesTableFactory.{TestSinkContextTableSink, changelogRow}
 import org.apache.flink.table.planner.runtime.utils.StreamingTestBase
 import org.apache.flink.table.planner.runtime.utils.TestData.{nullData4, smallTupleData3, tupleData3, tupleData5}
 import org.apache.flink.util.ExceptionUtils
-
 import org.junit.Assert.{assertEquals, assertFalse, assertTrue, fail}
 import org.junit.Test
 
 import java.lang.{Long => JLong}
 import java.math.{BigDecimal => JBigDecimal}
+import java.sql.Timestamp
+import java.time.{LocalDateTime, OffsetDateTime, ZoneId, ZoneOffset}
+import java.util.TimeZone
 
 import scala.collection.JavaConversions._
 
@@ -55,12 +57,10 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    t.window(Tumble over 5.millis on 'rowtime as 'w)
+    val table = t.window(Tumble over 5.millis on 'rowtime as 'w)
       .groupBy('w)
       .select('w.end as 't, 'id.count as 'icnt, 'num.sum as 'nsum)
-      .insertInto("appendSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "appendSink")
 
     val result = TestValuesTableFactory.getResults("appendSink")
     val expected = List(
@@ -88,8 +88,7 @@ class TableSinkITCase extends StreamingTestBase {
          |  'sink-insert-only' = 'true'
          |)
          |""".stripMargin)
-    tEnv.sqlUpdate("INSERT INTO appendSink SELECT id, ROW(num, text) FROM src")
-    tEnv.execute("job name")
+    execInsertSqlAndWaitResult("INSERT INTO appendSink SELECT id, ROW(num, text) FROM src")
 
     val result = TestValuesTableFactory.getResults("appendSink")
     val expected = List(
@@ -115,11 +114,9 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    ds1.join(ds2).where('b === 'e)
+    val table = ds1.join(ds2).where('b === 'e)
       .select('c, 'g)
-      .insertInto("appendSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "appendSink")
 
     val result = TestValuesTableFactory.getResults("appendSink")
     val expected = List("Hi,Hallo", "Hello,Hallo Welt", "Hello world,Hallo Welt")
@@ -144,12 +141,10 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    t.select('id, 'num, 'text.charLength() as 'len)
+    val table = t.select('id, 'num, 'text.charLength() as 'len)
       .groupBy('len)
       .select('len, 'id.count as 'icnt, 'num.sum as 'nsum)
-      .insertInto("retractSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "retractSink")
 
     val result = TestValuesTableFactory.getResults("retractSink")
     val expected = List(
@@ -177,12 +172,10 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    t.window(Tumble over 5.millis on 'rowtime as 'w)
+    val table = t.window(Tumble over 5.millis on 'rowtime as 'w)
       .groupBy('w)
       .select('w.end as 't, 'id.count as 'icnt, 'num.sum as 'nsum)
-      .insertInto("retractSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "retractSink")
 
     val rawResult = TestValuesTableFactory.getRawResults("retractSink")
     assertFalse(
@@ -218,15 +211,13 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    t.select('id, 'num, 'text.charLength() as 'len, ('id > 0) as 'cTrue)
+    val table = t.select('id, 'num, 'text.charLength() as 'len, ('id > 0) as 'cTrue)
       .groupBy('len, 'cTrue)
       // test query field name is different with registered sink field name
       .select('len, 'id.count as 'count, 'cTrue)
       .groupBy('count, 'cTrue)
       .select('count, 'len.count as 'lencnt, 'cTrue)
-      .insertInto("upsertSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "upsertSink")
 
     val rawResult = TestValuesTableFactory.getRawResults("upsertSink")
     assertTrue(
@@ -257,13 +248,11 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    t.window(Tumble over 5.millis on 'rowtime as 'w)
+    val table = t.window(Tumble over 5.millis on 'rowtime as 'w)
       .groupBy('w, 'num)
       // test query field name is different with registered sink field name
       .select('num, 'w.end as 'window_end, 'id.count as 'icnt)
-      .insertInto("upsertSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "upsertSink")
 
     val rawResult = TestValuesTableFactory.getRawResults("upsertSink")
     assertFalse(
@@ -303,12 +292,10 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    t.window(Tumble over 5.millis on 'rowtime as 'w)
+    val table = t.window(Tumble over 5.millis on 'rowtime as 'w)
       .groupBy('w, 'num)
       .select('w.end as 'wend, 'id.count as 'cnt)
-      .insertInto("upsertSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "upsertSink")
 
     val rawResult = TestValuesTableFactory.getRawResults("upsertSink")
     assertFalse(
@@ -347,12 +334,10 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    t.window(Tumble over 5.millis on 'rowtime as 'w)
+    val table = t.window(Tumble over 5.millis on 'rowtime as 'w)
       .groupBy('w, 'num)
       .select('num, 'id.count as 'cnt)
-      .insertInto("upsertSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "upsertSink")
 
     val rawResult = TestValuesTableFactory.getRawResults("upsertSink")
     assertFalse(
@@ -399,12 +384,10 @@ class TableSinkITCase extends StreamingTestBase {
     //   5, 5
     //   6, 6
 
-    t.groupBy('num)
+    val table = t.groupBy('num)
       .select('num, 'id.count as 'cnt)
       .where('cnt <= 3)
-      .insertInto("upsertSink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "upsertSink")
 
     val result = TestValuesTableFactory.getResults("upsertSink")
     val expected = List("1,1", "2,2", "3,3")
@@ -429,15 +412,14 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    t.window(Tumble over 5.milli on 'rowtime as 'w)
+    val table = t.window(Tumble over 5.milli on 'rowtime as 'w)
       .groupBy('num, 'w)
       .select('num, 'w.rowtime as 'rowtime1, 'w.rowtime as 'rowtime2)
-      .insertInto("sink")
 
     thrown.expect(classOf[TableException])
     thrown.expectMessage("Found more than one rowtime field: [rowtime1, rowtime2] " +
       "in the query when insert into 'default_catalog.default_database.sink'")
-    tEnv.execute("job name")
+    table.executeInsert("sink")
   }
 
   @Test
@@ -454,13 +436,11 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    env.fromCollection(tupleData3)
+    val table = env.fromCollection(tupleData3)
       .toTable(tEnv, 'a, 'b, 'c)
       .where('a > 20)
       .select("12345", 55.cast(DataTypes.DECIMAL(10, 0)), "12345".cast(DataTypes.CHAR(5)))
-      .insertInto("sink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "sink")
 
     val result = TestValuesTableFactory.getResults("sink")
     val expected = Seq("12345,55,12345")
@@ -482,13 +462,11 @@ class TableSinkITCase extends StreamingTestBase {
          |)
          |""".stripMargin)
 
-    env.fromCollection(tupleData3)
+    val table = env.fromCollection(tupleData3)
       .toTable(tEnv, 'a, 'b, 'c)
       .where('a > 20)
       .select("12345", 55.cast(DataTypes.DECIMAL(10, 0)), "12345".cast(DataTypes.CHAR(5)))
-      .insertInto("sink")
-
-    tEnv.execute("job name")
+    execInsertTableAndWaitResult(table, "sink")
 
     val result = TestValuesTableFactory.getResults("sink")
     val expected = Seq("12345,55,12345")
@@ -532,14 +510,13 @@ class TableSinkITCase extends StreamingTestBase {
         |  'sink-insert-only' = 'false'
         |)
         |""".stripMargin)
-    tEnv.sqlUpdate(
+    execInsertSqlAndWaitResult(
       """
         |INSERT INTO changelog_sink
         |SELECT product_id, user_name, SUM(order_price)
         |FROM orders
         |GROUP BY product_id, user_name
         |""".stripMargin)
-    tEnv.execute("job name")
 
     val rawResult = TestValuesTableFactory.getRawResults("changelog_sink")
     val expected = List(
@@ -584,14 +561,13 @@ class TableSinkITCase extends StreamingTestBase {
         |  'sink-insert-only' = 'false'
         |)
         |""".stripMargin)
-    tEnv.sqlUpdate(
+    execInsertSqlAndWaitResult(
       """
         |INSERT INTO final_sink
         |SELECT user_name, SUM(price) as total_pay
         |FROM changelog_source
         |GROUP BY user_name
         |""".stripMargin)
-    tEnv.execute("job name")
     val finalResult = TestValuesTableFactory.getResults("final_sink")
     val finalExpected = List(
       "user1,28.12", "user2,71.20", "user3,32.33", "user4,9.99")
@@ -623,11 +599,10 @@ class TableSinkITCase extends StreamingTestBase {
          |  'sink-insert-only' = 'true'
          |)
          |""".stripMargin)
-    tEnv.sqlUpdate("INSERT INTO not_null_sink SELECT * FROM nullable_src")
 
     // default should fail, because there are null values in the source
     try {
-      tEnv.execute("job name")
+      execInsertSqlAndWaitResult("INSERT INTO not_null_sink SELECT * FROM nullable_src")
       fail("Execution should fail.")
     } catch {
       case t: Throwable =>
@@ -641,11 +616,99 @@ class TableSinkITCase extends StreamingTestBase {
 
     // enable drop enforcer to make the query can run
     tEnv.getConfig.getConfiguration.setString("table.exec.sink.not-null-enforcer", "drop")
-    tEnv.sqlUpdate("INSERT INTO not_null_sink SELECT * FROM nullable_src")
-    tEnv.execute("job name")
+    execInsertSqlAndWaitResult("INSERT INTO not_null_sink SELECT * FROM nullable_src")
 
     val result = TestValuesTableFactory.getResults("not_null_sink")
     val expected = List("book,1,12", "book,4,11", "fruit,3,44")
     assertEquals(expected.sorted, result.sorted)
+  }
+
+  @Test
+  def testSinkContext(): Unit = {
+    val data = List(
+      rowOf("1970-01-01 00:00:00.001", localDateTime(1L), 1, 1d),
+      rowOf("1970-01-01 00:00:00.002", localDateTime(2L), 1, 2d),
+      rowOf("1970-01-01 00:00:00.003", localDateTime(3L), 1, 2d),
+      rowOf("1970-01-01 00:00:00.004", localDateTime(4L), 1, 5d),
+      rowOf("1970-01-01 00:00:00.007", localDateTime(7L), 1, 3d),
+      rowOf("1970-01-01 00:00:00.008", localDateTime(8L), 1, 3d),
+      rowOf("1970-01-01 00:00:00.016", localDateTime(16L), 1, 4d))
+
+    val dataId: String = TestValuesTableFactory.registerData(data)
+
+    val sourceDDL =
+      s"""
+         |CREATE TABLE src (
+         |  log_ts STRING,
+         |  ts TIMESTAMP(3),
+         |  a INT,
+         |  b DOUBLE,
+         |  WATERMARK FOR ts AS ts - INTERVAL '0.001' SECOND
+         |) WITH (
+         |  'connector' = 'values',
+         |  'data-id' = '$dataId'
+         |)
+      """.stripMargin
+
+    val sinkDDL =
+      s"""
+         |CREATE TABLE sink (
+         |  log_ts STRING,
+         |  ts TIMESTAMP(3),
+         |  a INT,
+         |  b DOUBLE
+         |) WITH (
+         |  'connector' = 'values',
+         |  'table-sink-class' = '${classOf[TestSinkContextTableSink].getName}'
+         |)
+      """.stripMargin
+
+    tEnv.executeSql(sourceDDL)
+    tEnv.executeSql(sinkDDL)
+
+    //---------------------------------------------------------------------------------------
+    // Verify writing out a source directly with the rowtime attribute
+    //---------------------------------------------------------------------------------------
+
+    execInsertSqlAndWaitResult("INSERT INTO sink SELECT * FROM src")
+
+    val expected = List(1000, 2000, 3000, 4000, 7000, 8000, 16000)
+    assertEquals(expected.sorted, TestSinkContextTableSink.ROWTIMES.sorted)
+
+    val sinkDDL2 =
+      s"""
+         |CREATE TABLE sink2 (
+         |  window_rowtime TIMESTAMP(3),
+         |  b DOUBLE
+         |) WITH (
+         |  'connector' = 'values',
+         |  'table-sink-class' = '${classOf[TestSinkContextTableSink].getName}'
+         |)
+      """.stripMargin
+    tEnv.executeSql(sinkDDL2)
+
+    //---------------------------------------------------------------------------------------
+    // Verify writing out with additional operator to generate a new rowtime attribute
+    //---------------------------------------------------------------------------------------
+
+    execInsertSqlAndWaitResult(
+      """
+        |INSERT INTO sink2
+        |SELECT
+        |  TUMBLE_ROWTIME(ts, INTERVAL '5' SECOND),
+        |  SUM(b)
+        |FROM src
+        |GROUP BY TUMBLE(ts, INTERVAL '5' SECOND)
+        |""".stripMargin
+    )
+
+    val expected2 = List(4999, 9999, 19999)
+    assertEquals(expected2.sorted, TestSinkContextTableSink.ROWTIMES.sorted)
+  }
+
+  // ------------------------------------------------------------------------------------------
+
+  private def localDateTime(epochSecond: Long): LocalDateTime = {
+    LocalDateTime.ofEpochSecond(epochSecond, 0, ZoneOffset.UTC)
   }
 }

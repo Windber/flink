@@ -49,7 +49,7 @@ __all__ = [
 ]
 
 
-class TableEnvironment(object):
+class TableEnvironment(object, metaclass=ABCMeta):
     """
     A table environment is the base class, entry point, and central context for creating Table
     and SQL API programs.
@@ -80,8 +80,6 @@ class TableEnvironment(object):
         environments in the corresponding bridging modules.
 
     """
-
-    __metaclass__ = ABCMeta
 
     def __init__(self, j_tenv, serializer=PickleSerializer()):
         self._j_tenv = j_tenv
@@ -189,7 +187,7 @@ class TableEnvironment(object):
         :param table_source: The table source to register.
         :type table_source: pyflink.table.TableSource
 
-        .. note:: Deprecated in 1.10. Use :func:`connect` instead.
+        .. note:: Deprecated in 1.10. Use :func:`execute_sql` instead.
         """
         warnings.warn("Deprecated in 1.10. Use connect instead.", DeprecationWarning)
         self._j_tenv.registerTableSourceInternal(name, table_source._j_table_source)
@@ -214,7 +212,7 @@ class TableEnvironment(object):
         :param table_sink: The table sink to register.
         :type table_sink: pyflink.table.TableSink
 
-        .. note:: Deprecated in 1.10. Use :func:`connect` instead.
+        .. note:: Deprecated in 1.10. Use :func:`execute_sql` instead.
         """
         warnings.warn("Deprecated in 1.10. Use connect instead.", DeprecationWarning)
         self._j_tenv.registerTableSinkInternal(name, table_sink._j_table_sink)
@@ -798,6 +796,8 @@ class TableEnvironment(object):
         :return: A :class:`~pyflink.table.descriptors.ConnectTableDescriptor` used to build the
                  temporary table.
         :rtype: pyflink.table.descriptors.ConnectTableDescriptor
+
+        .. note:: Deprecated in 1.11. Use :func:`execute_sql` to register a table instead.
         """
         pass
 
@@ -1258,7 +1258,7 @@ class TableEnvironment(object):
             result_type,
             pytz.timezone(self.get_config().get_local_timezone()))
         step = -(-len(pdf) // splits_num)
-        pdf_slices = [pdf[start:start + step] for start in range(0, len(pdf), step)]
+        pdf_slices = [pdf.iloc[start:start + step] for start in range(0, len(pdf), step)]
         data = [[c for (_, c) in pdf_slice.iteritems()] for pdf_slice in pdf_slices]
         try:
             with temp_file:
@@ -1397,7 +1397,10 @@ class StreamTableEnvironment(TableEnvironment):
         :return: A :class:`~pyflink.table.descriptors.StreamTableDescriptor` used to build the
                  temporary table.
         :rtype: pyflink.table.descriptors.StreamTableDescriptor
+
+        .. note:: Deprecated in 1.11. Use :func:`execute_sql` to register a table instead.
         """
+        warnings.warn("Deprecated in 1.11. Use execute_sql instead.", DeprecationWarning)
         return StreamTableDescriptor(
             self._j_tenv.connect(connector_descriptor._j_connector_descriptor))
 
@@ -1531,7 +1534,10 @@ class BatchTableEnvironment(TableEnvironment):
                  to build the temporary table.
         :rtype: pyflink.table.descriptors.BatchTableDescriptor or
                 pyflink.table.descriptors.StreamTableDescriptor
+
+        .. note:: Deprecated in 1.11. Use :func:`execute_sql` to register a table instead.
         """
+        warnings.warn("Deprecated in 1.11. Use execute_sql instead.", DeprecationWarning)
         gateway = get_gateway()
         blink_t_env_class = get_java_class(
             gateway.jvm.org.apache.flink.table.api.internal.TableEnvironmentImpl)
