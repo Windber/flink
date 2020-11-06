@@ -45,6 +45,7 @@ import org.apache.flink.runtime.jobmanager.scheduler.CoLocationGroup;
 import org.apache.flink.runtime.jobmanager.scheduler.SlotSharingGroup;
 import org.apache.flink.runtime.operators.util.TaskConfig;
 import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -505,6 +506,32 @@ public class StreamingJobGraphGeneratorTest extends TestLogger {
 			sourceAndMapVertex.getProducedDataSets().get(0).getResultType());
 	}
 
+	@Test(expected = UnsupportedOperationException.class)
+	public void testConflictShuffleModeWithBufferTimeout() {
+		testCompatibleShuffleModeWithBufferTimeout(ShuffleMode.BATCH);
+	}
+
+	@Test
+	public void testNormalShuffleModeWithBufferTimeout() {
+		testCompatibleShuffleModeWithBufferTimeout(ShuffleMode.PIPELINED);
+	}
+
+	private void testCompatibleShuffleModeWithBufferTimeout(ShuffleMode shuffleMode) {
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		env.setBufferTimeout(100);
+
+		DataStream<Integer> sourceDataStream = env.fromElements(1, 2, 3);
+		PartitionTransformation<Integer> transformation = new PartitionTransformation<>(
+			sourceDataStream.getTransformation(),
+			new RebalancePartitioner<>(),
+			shuffleMode);
+
+		DataStream<Integer> partitionStream = new DataStream<>(env, transformation);
+		partitionStream.map(value -> value).print();
+
+		StreamingJobGraphGenerator.createJobGraph(env.getStreamGraph());
+	}
+
 	/**
 	 * Test iteration job, check slot sharing group and co-location group.
 	 */
@@ -860,6 +887,25 @@ public class StreamingJobGraphGeneratorTest extends TestLogger {
 		partitioned.map(v -> v).name("map2");
 
 		return env.getStreamGraph();
+	}
+
+	/**
+	 * Verifies fix for FLINK-19109, where WatermarkGenerator cannot be chained to ContinuousFileReaderOperator in event
+	 * time.
+	 */
+	@Test
+	public void testContinuousFileReaderOperatorNotChained() {
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+		// set parallelism to 2 to avoid chaining with source in case when available processors is 1.
+		env.setParallelism(2);
+		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+
+		env.readTextFile("file:///dummy").print();
+		JobGraph jobGraph = StreamingJobGraphGenerator.createJobGraph(env.getStreamGraph());
+
+		List<JobVertex> verticesSorted = jobGraph.getVerticesSortedTopologicallyFromSources();
+		assertEquals(3, verticesSorted.size());
 	}
 
 	private void assertSameSlotSharingGroup(JobVertex... vertices) {
