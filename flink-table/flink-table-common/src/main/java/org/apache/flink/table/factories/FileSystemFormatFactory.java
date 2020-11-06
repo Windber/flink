@@ -26,7 +26,7 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.expressions.Expression;
+import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -38,7 +38,11 @@ import java.util.stream.Collectors;
 
 /**
  * File system format factory for creating configured instances of reader and writer.
+ *
+ * @deprecated This interface has been replaced by {@link BulkReaderFormatFactory} and
+ *             {@link BulkWriterFormatFactory}.
  */
+@Deprecated
 @Internal
 public interface FileSystemFormatFactory extends Factory {
 
@@ -104,7 +108,7 @@ public interface FileSystemFormatFactory extends Factory {
 		 * Pushed down filters, reader can try its best to filter records.
 		 * The follow up operator will filter the records again.
 		 */
-		List<Expression> getPushedDownFilters();
+		List<ResolvedExpression> getPushedDownFilters();
 
 		/**
 		 * Get field names without partition keys.
@@ -130,6 +134,7 @@ public interface FileSystemFormatFactory extends Factory {
 		 */
 		default RowType getFormatRowType() {
 			return RowType.of(
+				false,
 				Arrays.stream(getFormatFieldTypes())
 					.map(DataType::getLogicalType)
 					.toArray(LogicalType[]::new),
@@ -194,6 +199,7 @@ public interface FileSystemFormatFactory extends Factory {
 		 */
 		default RowType getFormatRowType() {
 			return RowType.of(
+				false,
 				Arrays.stream(getFormatFieldTypes())
 					.map(DataType::getLogicalType)
 					.toArray(LogicalType[]::new),

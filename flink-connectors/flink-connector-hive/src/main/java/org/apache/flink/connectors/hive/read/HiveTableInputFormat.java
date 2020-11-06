@@ -90,8 +90,8 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<RowData, H
 	// indices of fields to be returned, with projection applied (if any)
 	private int[] selectedFields;
 
-	//We should limit the input read count of this splits, -1 represents no limit.
-	private long limit;
+	//We should limit the input read count of this splits, null represents no limit.
+	private Long limit;
 
 	private boolean useMapRedReader;
 
@@ -105,7 +105,7 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<RowData, H
 			CatalogTable catalogTable,
 			List<HiveTablePartition> partitions,
 			int[] projectedFields,
-			long limit,
+			Long limit,
 			String hiveVersion,
 			boolean useMapRedReader) {
 		super(jobConf.getCredentials());
@@ -255,7 +255,7 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<RowData, H
 
 	@Override
 	public boolean reachedEnd() throws IOException {
-		if (limit > 0 && currentReadCount >= limit) {
+		if (limit != null && currentReadCount >= limit) {
 			return true;
 		} else {
 			return reader.reachedEnd();
@@ -329,6 +329,24 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<RowData, H
 		return new LocatableInputSplitAssigner(inputSplits);
 	}
 
+	public int getNumFiles() throws IOException {
+		int numFiles = 0;
+		FileSystem fs = null;
+		for (HiveTablePartition partition : partitions) {
+			StorageDescriptor sd = partition.getStorageDescriptor();
+			Path inputPath = new Path(sd.getLocation());
+			if (fs == null) {
+				fs = inputPath.getFileSystem(jobConf);
+			}
+			// it's possible a partition exists in metastore but the data has been removed
+			if (!fs.exists(inputPath)) {
+				continue;
+			}
+			numFiles += fs.listStatus(inputPath).length;
+		}
+		return numFiles;
+	}
+
 	// --------------------------------------------------------------------------------------------
 	//  Custom serialization methods
 	// --------------------------------------------------------------------------------------------
@@ -363,7 +381,7 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<RowData, H
 		fieldNames = (String[]) in.readObject();
 		partitions = (List<HiveTablePartition>) in.readObject();
 		selectedFields = (int[]) in.readObject();
-		limit = (long) in.readObject();
+		limit = (Long) in.readObject();
 		hiveVersion = (String) in.readObject();
 		useMapRedReader = in.readBoolean();
 	}

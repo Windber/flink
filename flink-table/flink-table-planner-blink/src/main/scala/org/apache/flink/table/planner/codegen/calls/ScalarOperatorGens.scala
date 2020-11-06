@@ -591,7 +591,7 @@ object ScalarOperatorGens {
       ctx: CodeGeneratorContext,
       operand: GeneratedExpression): GeneratedExpression = {
     if (ctx.nullCheck) {
-      GeneratedExpression(operand.nullTerm, NEVER_NULL, operand.code, new BooleanType())
+      GeneratedExpression(operand.nullTerm, NEVER_NULL, operand.code, new BooleanType(false))
     }
     else if (!ctx.nullCheck && isReference(operand.resultType)) {
       val resultTerm = newName("isNull")
@@ -600,10 +600,10 @@ object ScalarOperatorGens {
            |${operand.code}
            |boolean $resultTerm = ${operand.resultTerm} == null;
            |""".stripMargin
-      GeneratedExpression(resultTerm, NEVER_NULL, operatorCode, new BooleanType())
+      GeneratedExpression(resultTerm, NEVER_NULL, operatorCode, new BooleanType(false))
     }
     else {
-      GeneratedExpression("false", NEVER_NULL, operand.code, new BooleanType())
+      GeneratedExpression("false", NEVER_NULL, operand.code, new BooleanType(false))
     }
   }
 
@@ -617,7 +617,7 @@ object ScalarOperatorGens {
            |${operand.code}
            |boolean $resultTerm = !${operand.nullTerm};
            |""".stripMargin.trim
-      GeneratedExpression(resultTerm, NEVER_NULL, operatorCode, new BooleanType())
+      GeneratedExpression(resultTerm, NEVER_NULL, operatorCode, new BooleanType(false))
     }
     else if (!ctx.nullCheck && isReference(operand.resultType)) {
       val resultTerm = newName("result")
@@ -626,10 +626,10 @@ object ScalarOperatorGens {
            |${operand.code}
            |boolean $resultTerm = ${operand.resultTerm} != null;
            |""".stripMargin.trim
-      GeneratedExpression(resultTerm, NEVER_NULL, operatorCode, new BooleanType())
+      GeneratedExpression(resultTerm, NEVER_NULL, operatorCode, new BooleanType(false))
     }
     else {
-      GeneratedExpression("true", NEVER_NULL, operand.code, new BooleanType())
+      GeneratedExpression("true", NEVER_NULL, operand.code, new BooleanType(false))
     }
   }
 
@@ -869,7 +869,8 @@ object ScalarOperatorGens {
           operand.resultType.asInstanceOf[TimestampType].getKind == TimestampKind.ROWTIME ||
           targetType.asInstanceOf[TimestampType].getKind == TimestampKind.PROCTIME ||
           targetType.asInstanceOf[TimestampType].getKind == TimestampKind.ROWTIME =>
-        operand.copy(resultType = new TimestampType(3)) // just replace the DataType
+        // just replace the DataType
+        operand.copy(resultType = new TimestampType(operand.resultType.isNullable, 3))
 
     case (TIMESTAMP_WITHOUT_TIME_ZONE, TIMESTAMP_WITHOUT_TIME_ZONE) =>
       val fromType = operand.resultType.asInstanceOf[TimestampType]
@@ -967,7 +968,7 @@ object ScalarOperatorGens {
       generateCastArrayToString(ctx, operand, operand.resultType.asInstanceOf[ArrayType])
 
     // Byte array -> String UTF-8
-    case (VARBINARY, VARCHAR | CHAR) =>
+    case (BINARY | VARBINARY, VARCHAR | CHAR) =>
       val charset = classOf[StandardCharsets].getCanonicalName
       generateStringResultCallIfArgsNotNull(ctx, Seq(operand)) {
         terms => s"(new String(${terms.head}, $charset.UTF_8))"

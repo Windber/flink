@@ -57,7 +57,6 @@ under the License.
 		<module>flink-datastream-allround-test</module>
 		<module>flink-batch-sql-test</module>
 		<module>flink-stream-sql-test</module>
-		<module>flink-bucketing-sink-test</module>
 		<module>flink-distributed-cache-via-blob-test</module>
 		<module>flink-high-parallelism-iterations-test</module>
 		<module>flink-stream-stateful-job-upgrade-test</module>
@@ -79,8 +78,6 @@ under the License.
 		<module>flink-connector-gcp-pubsub-emulator-tests</module>
 		<module>flink-streaming-kafka-test-base</module>
 		<module>flink-streaming-kafka-test</module>
-		<module>flink-streaming-kafka011-test</module>
-		<module>flink-streaming-kafka010-test</module>
 		<module>flink-plugins-test</module>
 		<module>flink-tpch-test</module>
 		<module>flink-streaming-kinesis-test</module>

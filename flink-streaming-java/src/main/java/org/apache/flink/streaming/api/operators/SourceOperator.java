@@ -28,6 +28,7 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SourceSplit;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.metrics.MetricGroup;
@@ -41,6 +42,7 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.source.TimestampsAndWatermarks;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.util.CollectionUtil;
@@ -65,7 +67,6 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * @param <OUT> The output type of the operator.
  */
 @Internal
-@SuppressWarnings("serial")
 public class SourceOperator<OUT, SplitT extends SourceSplit>
 		extends AbstractStreamOperator<OUT>
 		implements OperatorEventHandler, PushingAsyncDataInput<OUT> {
@@ -89,6 +90,18 @@ public class SourceOperator<OUT, SplitT extends SourceSplit>
 	/** The factory for timestamps and watermark generators. */
 	private final WatermarkStrategy<OUT> watermarkStrategy;
 
+	/** The Flink configuration. */
+	private final Configuration configuration;
+
+	/** Host name of the machine where the operator runs, to support locality aware work assignment. */
+	private final String localHostname;
+
+	/**
+	 * Whether to periodically emit watermarks as we go or only one final watermark at the end of
+	 * input.
+	 */
+	private final boolean emitProgressiveWatermarks;
+
 	// ---- lazily initialized fields (these fields are the "hot" fields) ----
 
 	/** The source reader that does most of the work. */
@@ -110,13 +123,19 @@ public class SourceOperator<OUT, SplitT extends SourceSplit>
 			OperatorEventGateway operatorEventGateway,
 			SimpleVersionedSerializer<SplitT> splitSerializer,
 			WatermarkStrategy<OUT> watermarkStrategy,
-			ProcessingTimeService timeService) {
+			ProcessingTimeService timeService,
+			Configuration configuration,
+			String localHostname,
+			boolean emitProgressiveWatermarks) {
 
 		this.readerFactory = checkNotNull(readerFactory);
 		this.operatorEventGateway = checkNotNull(operatorEventGateway);
 		this.splitSerializer = checkNotNull(splitSerializer);
 		this.watermarkStrategy = checkNotNull(watermarkStrategy);
 		this.processingTimeService = timeService;
+		this.configuration = checkNotNull(configuration);
+		this.localHostname = checkNotNull(localHostname);
+		this.emitProgressiveWatermarks = emitProgressiveWatermarks;
 	}
 
 	@Override
@@ -130,19 +149,39 @@ public class SourceOperator<OUT, SplitT extends SourceSplit>
 			}
 
 			@Override
+			public Configuration getConfiguration() {
+				return configuration;
+			}
+
+			@Override
+			public String getLocalHostName() {
+				return localHostname;
+			}
+
+			@Override
+			public int getIndexOfSubtask() {
+				return getRuntimeContext().getIndexOfThisSubtask();
+			}
+
+			@Override
 			public void sendSourceEventToCoordinator(SourceEvent event) {
 				operatorEventGateway.sendEventToCoordinator(new SourceEventWrapper(event));
 			}
 		};
 
-		// in the future when we support both batch and streaming modes for the source operator,
-		// and when this one is migrated to the "eager initialization" operator (StreamOperatorV2),
-		// then we should evaluate this during operator construction.
-		eventTimeLogic = TimestampsAndWatermarks.createStreamingEventTimeLogic(
-				watermarkStrategy,
-				metricGroup,
-				getProcessingTimeService(),
-				getExecutionConfig().getAutoWatermarkInterval());
+		// in the future when we this one is migrated to the "eager initialization" operator
+		// (StreamOperatorV2), then we should evaluate this during operator construction.
+		if (emitProgressiveWatermarks) {
+			eventTimeLogic = TimestampsAndWatermarks.createProgressiveEventTimeLogic(
+					watermarkStrategy,
+					metricGroup,
+					getProcessingTimeService(),
+					getExecutionConfig().getAutoWatermarkInterval());
+		} else {
+			eventTimeLogic = TimestampsAndWatermarks.createNoOpEventTimeLogic(
+					watermarkStrategy,
+					metricGroup);
+		}
 
 		sourceReader = readerFactory.apply(context);
 
@@ -152,18 +191,23 @@ public class SourceOperator<OUT, SplitT extends SourceSplit>
 			sourceReader.addSplits(splits);
 		}
 
-		// Start the reader.
-		sourceReader.start();
 		// Register the reader to the coordinator.
 		registerReader();
+
+		// Start the reader after registration, sending messages in start is allowed.
+		sourceReader.start();
 
 		eventTimeLogic.startPeriodicWatermarkEmits();
 	}
 
 	@Override
 	public void close() throws Exception {
-		sourceReader.close();
-		eventTimeLogic.stopPeriodicWatermarkEmits();
+		if (sourceReader != null) {
+			sourceReader.close();
+		}
+		if (eventTimeLogic != null) {
+			eventTimeLogic.stopPeriodicWatermarkEmits();
+		}
 		super.close();
 	}
 
@@ -175,19 +219,28 @@ public class SourceOperator<OUT, SplitT extends SourceSplit>
 
 		// short circuit the common case (every invocation except the first)
 		if (currentMainOutput != null) {
-			return sourceReader.pollNext(currentMainOutput);
+			return pollNextRecord(output);
 		}
 
 		// this creates a batch or streaming output based on the runtime mode
 		currentMainOutput = eventTimeLogic.createMainOutput(output);
 		lastInvokedOutput = output;
-		return sourceReader.pollNext(currentMainOutput);
+		return pollNextRecord(output);
+	}
+
+	private InputStatus pollNextRecord(DataOutput<OUT> output) throws Exception {
+		InputStatus inputStatus = sourceReader.pollNext(currentMainOutput);
+		if (inputStatus == InputStatus.END_OF_INPUT) {
+			output.emitWatermark(Watermark.MAX_WATERMARK);
+		}
+		return inputStatus;
 	}
 
 	@Override
 	public void snapshotState(StateSnapshotContext context) throws Exception {
-		LOG.debug("Taking a snapshot for checkpoint {}", context.getCheckpointId());
-		readerState.update(sourceReader.snapshotState());
+		long checkpointId = context.getCheckpointId();
+		LOG.debug("Taking a snapshot for checkpoint {}", checkpointId);
+		readerState.update(sourceReader.snapshotState(checkpointId));
 	}
 
 	@Override
@@ -200,6 +253,18 @@ public class SourceOperator<OUT, SplitT extends SourceSplit>
 		super.initializeState(context);
 		final ListState<byte[]> rawState = context.getOperatorStateStore().getListState(SPLITS_STATE_DESC);
 		readerState = new SimpleVersionedListState<>(rawState, splitSerializer);
+	}
+
+	@Override
+	public void notifyCheckpointComplete(long checkpointId) throws Exception {
+		super.notifyCheckpointComplete(checkpointId);
+		sourceReader.notifyCheckpointComplete(checkpointId);
+	}
+
+	@Override
+	public void notifyCheckpointAborted(long checkpointId) throws Exception {
+		super.notifyCheckpointAborted(checkpointId);
+		sourceReader.notifyCheckpointAborted(checkpointId);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -219,8 +284,7 @@ public class SourceOperator<OUT, SplitT extends SourceSplit>
 
 	private void registerReader() {
 		operatorEventGateway.sendEventToCoordinator(new ReaderRegistrationEvent(
-				getRuntimeContext().getIndexOfThisSubtask(),
-				"UNKNOWN_LOCATION"));
+				getRuntimeContext().getIndexOfThisSubtask(), localHostname));
 	}
 
 	// --------------- methods for unit tests ------------

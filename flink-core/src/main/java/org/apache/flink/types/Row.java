@@ -26,6 +26,8 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.Arrays;
 
+import static org.apache.flink.types.RowUtils.deepEqualsInternal;
+
 /**
  * A row is a fixed-length, null-aware composite type for storing multiple values in a deterministic
  * field order. Every field can be null regardless of the field's type. The type of row fields cannot
@@ -273,5 +275,18 @@ public final class Row implements Serializable {
 		}
 
 		return joinedRow;
+	}
+
+	/**
+	 * Compares two {@link Row}s for deep equality. This method supports all conversion classes of the
+	 * table ecosystem.
+	 *
+	 * <p>The current implementation of {@link Row#equals(Object)} is not able to compare all deeply
+	 * nested row structures that might be created in the table ecosystem. For example, it does not
+	 * support comparing arrays stored in the values of a map. We might update the {@link #equals(Object)}
+	 * with this implementation in future versions.
+	 */
+	public static boolean deepEquals(Row row1, Row row2) {
+		return deepEqualsInternal(row1, row2);
 	}
 }

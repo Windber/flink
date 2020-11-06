@@ -25,13 +25,36 @@ under the License.
 * This will be replaced by the TOC
 {:toc}
 
-在该教程中，我们会从零开始，介绍如何创建一个Flink Python项目及运行Python Table API程序。
+Apache Flink 提供 Table API 关系型 API 来统一处理流和批，即查询在无边界的实时流或有边界的批处理数据集上以相同的语义执行，并产生相同的结果。 Flink 的 Table API 易于编写，通常能简化数据分析，数据管道和ETL应用的编码。
 
-关于Python执行环境的要求，请参考Python Table API[环境安装]({% link dev/python/installation.zh.md %})。
+## 概要
 
-## 创建一个Python Table API项目
+在该教程中，我们会从零开始，介绍如何创建一个Flink Python项目及运行Python Table API程序。该程序读取一个csv文件，处理后，将结果写到一个结果csv文件中。
 
-首先，使用您最熟悉的IDE创建一个Python项目，然后安装PyFlink包，请参考[PyFlink安装指南]({% link dev/python/installation.zh.md %}#pyflink-安装)了解详细信息。
+## 先决条件
+
+本练习假定您对Python有一定的了解，但是即使您来自其他编程语言，也应该能够继续学习。
+它还假定您熟悉基本的关系操作，例如`SELECT`和`GROUP BY`子句。
+
+## 如何寻求帮助
+
+如果您遇到问题，可以访问 [社区信息页面](https://flink.apache.org/zh/community.html)。
+与此同时，Apache Flink 的[用户邮件列表](https://flink.apache.org/zh/community.html#mailing-lists) 一直被列为Apache项目中最活跃的项目邮件列表之一，也是快速获得帮助的好方法。
+
+## 继续我们的旅程
+
+如果要继续我们的旅程，您需要一台具有以下功能的计算机：
+
+* Java 8 or 11
+* Python 3.5, 3.6 or 3.7
+
+使用Python Table API需要安装PyFlink，它已经被发布到 [PyPi](https://pypi.org/project/apache-flink/)，您可以通过如下方式安装PyFlink：
+
+{% highlight bash %}
+$ python -m pip install apache-flink
+{% endhighlight %}
+
+安装PyFlink后，您便可以编写Python Table API作业了。
 
 ## 编写一个Flink Python Table API程序
 
@@ -104,19 +127,17 @@ t_env.sql_update(my_sink_ddl)
 
 接下来，我们介绍如何创建一个作业：该作业读取表`mySource`中的数据，进行一些变换，然后将结果写入表`mySink`。
 
-{% highlight python %}
-t_env.scan('mySource') \
-    .group_by('word') \
-    .select('word, count(1)') \
-    .insert_into('mySink')
-{% endhighlight %}
-
 最后，需要做的就是启动Flink Python Table API作业。上面所有的操作，比如创建源表
-进行变换以及写入结果表的操作都只是构建作业逻辑图，只有当`t_env.execute(job_name)`被调用的时候，
+进行变换以及写入结果表的操作都只是构建作业逻辑图，只有当`execute_insert(sink_name)`被调用的时候，
 作业才会被真正提交到集群或者本地进行执行。
 
 {% highlight python %}
-t_env.execute("python_job")
+from pyflink.table.expressions import lit
+
+tab = t_env.from_path('mySource')
+tab.group_by(tab.word) \
+   .select(tab.word, lit(1).count) \
+   .execute_insert('mySink').wait()
 {% endhighlight %}
 
 该教程的完整代码如下:
@@ -125,6 +146,7 @@ t_env.execute("python_job")
 from pyflink.dataset import ExecutionEnvironment
 from pyflink.table import TableConfig, DataTypes, BatchTableEnvironment
 from pyflink.table.descriptors import Schema, OldCsv, FileSystem
+from pyflink.table.expressions import lit
 
 exec_env = ExecutionEnvironment.get_execution_environment()
 exec_env.set_parallelism(1)
@@ -148,12 +170,10 @@ t_env.connect(FileSystem().path('/tmp/output')) \
                  .field('count', DataTypes.BIGINT())) \
     .create_temporary_table('mySink')
 
-t_env.from_path('mySource') \
-    .group_by('word') \
-    .select('word, count(1)') \
-    .insert_into('mySink')
-
-t_env.execute("python_job")
+tab = t_env.from_path('mySource')
+tab.group_by(tab.word) \
+   .select(tab.word, lit(1).count) \
+   .execute_insert('mySink').wait()
 {% endhighlight %}
 
 ## 执行一个Flink Python Table API程序
